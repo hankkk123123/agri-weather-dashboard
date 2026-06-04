@@ -99,14 +99,15 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
 
         elements = target_loc.get('weatherElement', [])
         
+        # 💡 依照 Swagger 截圖中的官方指定中文名稱進行精確匹配
         wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
         for el in elements:
             name = str(el.get('elementName', '')).strip()
-            if name in ['Wx', '天氣現象']: wx_el = el
-            elif name in ['PoP12h', 'PoP', '12小時降雨機率', '降雨機率']: pop_el = el
-            elif name in ['T', '平均溫度', '溫度']: t_el = el
-            elif name in ['RH', '相對濕度']: rh_el = el
-            elif name in ['WD', '風向']: wd_el = el
+            if name in ['天氣現象', 'Wx']: wx_el = el
+            elif name in ['12小時降雨機率', 'PoP12h', 'PoP', '降雨機率']: pop_el = el
+            elif name in ['平均溫度', 'T', '溫度']: t_el = el
+            elif name in ['平均相對濕度', '相對濕度', 'RH']: rh_el = el
+            elif name in ['風向', 'WD']: wd_el = el
 
         if not wx_el:
             return None
@@ -117,7 +118,6 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
 
         for i in range(display_slots):
             t_node = wx_el['time'][i]
-            # 💡 修正一週預報時間屬性：改用 startTime 欄位
             start_dt = t_node.get('startTime', '00-00 00:00')
             
             date_label = start_dt[5:10].replace('-', '/')
@@ -180,9 +180,9 @@ try:
     cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C" if cy_obs_temp != "N/A" else "N/A")
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
-    st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 核心修正：將函數名稱對齊修正為 fetch_and_build_week_matrix
-    cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "東區")
+    st.markdown("#### 📊 嘉義中區未來一週農事氣象矩陣報表 (白天/晚上)")
+    # 💡 依照測站資料截圖校正：嘉義農試所所屬行政區域為「中區」
+    cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "中區")
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
@@ -214,7 +214,6 @@ try:
     ty_col3.metric(label="🌧️ 桃園當日累積降雨量", value=f"{ty_obs_rain} mm")
     
     st.markdown("#### 📊 桃園新屋區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 核心修正：將函數名稱對齊修正為 fetch_and_build_week_matrix
     ty_matrix = fetch_and_build_week_matrix("F-D0047-007", "F-D0047-091", "新屋區")
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
