@@ -54,17 +54,16 @@ with top_col2:
         st.session_state["api_key"] = ""
         st.rerun()
 
-# ----------------- 📦 核心函數：全時段穩定解析大腦 -----------------
-def fetch_and_build_matrix(api_code, backup_api_code, county_name, township_name):
+# ----------------- 📦 核心函數：72小時精細矩陣解析大腦 -----------------
+def fetch_and_build_72h_matrix(api_code, backup_api_code, township_name):
     """
-    不管氣象署怎麼更新、換班、改動結構，都保證輸出預報表格的超強解析函數
+    對接 Swagger 逐 3 小時資料集，產出未來 72 小時高精細度農事矩陣
     """
     headers = {"User-Agent": "Mozilla/5.0"}
     primary_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{api_code}?Authorization={CWA_API_KEY}&locationName={township_name}"
     backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{backup_api_code}?Authorization={CWA_API_KEY}&locationName={township_name}"
     
     res_json = None
-    # 🌟 防禦機制 1：主要 API 不通，秒切換至備援 API 資料集
     try:
         res = requests.get(primary_url, headers=headers, verify=False, timeout=8)
         if res.status_code == 200 and "records" in res.json():
@@ -80,15 +79,9 @@ def fetch_and_build_matrix(api_code, backup_api_code, county_name, township_name
         except:
             return None
 
-    if not res_json:
-        return None
-
     try:
-        # 🌟 防禦機制 2：層級解構模糊比對，徹底無視 locations 還是 location 字母變動
         records = res_json.get('records', {})
         loc_container = []
-        
-        # 遍歷尋找包含行政區資料的節點
         for k, v in records.items():
             if isinstance(v, list) and len(v) > 0 and 'location' in str(v[0]):
                 loc_container = v[0].get('location', [])
@@ -96,31 +89,24 @@ def fetch_and_build_matrix(api_code, backup_api_code, county_name, township_name
             elif isinstance(v, dict) and 'location' in v:
                 loc_container = v.get('location', [])
                 break
-                
         if not loc_container and 'WeatherForecast' in records:
             loc_container = records['WeatherForecast'].get('location', [])
 
-        # 篩選匹配的鄉鎮區
-        target_loc = None
-        if loc_container:
-            for loc in loc_container:
-                if loc.get('locationName') == township_name:
-                    target_loc = loc
-                    break
-            if not target_loc:
-                target_loc = loc_container[0]
+        target_loc = next((loc for loc in loc_container if loc.get('locationName') == township_name), None) if loc_container else None
+        if not target_loc and loc_container:
+            target_loc = loc_container[0]
 
         if not target_loc:
             return None
 
         elements = target_loc.get('weatherElement', [])
         
-        # 🌟 防禦機制 3：元素名稱寬鬆匹配 (中英文與空格相容)
+        # 模糊匹配 72 小時資料集的專屬元素名稱
         wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
         for el in elements:
             name = str(el.get('elementName', '')).strip()
             if name in ['Wx', '天氣現象']: wx_el = el
-            elif name in ['PoP12h', 'PoP', '12小時降雨機率']: pop_el = el
+            elif name in ['PoP6h', 'PoP12h', 'PoP', '3小時降雨機率', '降雨機率']: pop_el = el
             elif name in ['T', '平均溫度', '溫度']: t_el = el
             elif name in ['RH', '相對濕度']: rh_el = el
             elif name in ['WD', '風向']: wd_el = el
@@ -128,28 +114,27 @@ def fetch_and_build_matrix(api_code, backup_api_code, county_name, township_name
         if not wx_el:
             return None
 
-        # 🌟 防禦機制 4：動態長度保護，有多少時段顯示多少，絕不越界閃退
         matrix_data = {}
+        # 72 小時逐 3 小時預報共 24 個時段
         available_slots = len(wx_el.get('time', []))
-        display_slots = min(12, available_slots) # 最多拿 12 個時段 (6天)
+        display_slots = min(24, available_slots) 
 
         for i in range(display_slots):
             t_node = wx_el['time'][i]
-            start_dt = t_node.get('startTime', '00-00 00:00')
+            # 取得起始時間 (例如 2026-06-04 15:00:00)
+            data_time = t_node.get('dataTime', t_node.get('startTime', '00-00 00:00'))
             
-            date_label = start_dt[5:10].replace('-', '/')
-            hour_part = int(start_dt[11:13]) if len(start_dt) > 13 else 12
-            day_part = "白天" if 6 <= hour_part < 18 else "晚上"
-            column_name = f"{date_label}\n({day_part})"
+            date_label = data_time[5:10].replace('-', '/')
+            hour_label = data_time[11:16]
+            column_name = f"{date_label}\n{hour_label}"
             
-            # 安全取值工具
             def get_val(element, index, fallback="N/A"):
                 if element and 'time' in element and index < len(element['time']):
                     return element['time'][index]['elementValue'][0]['value']
                 return fallback
 
             wx_val = t_node['elementValue'][0]['value']
-            pop_val = get_val(pop_el, i, "0")
+            pop_val = get_val(pop_el, i // 2 if pop_el and len(pop_el['time']) <= 12 else i, "0") # 自動平滑降雨時段對齊
             pop_display = f"{pop_val}%" if str(pop_val).strip().isdigit() else "0%"
             t_val = f"{get_val(t_el, i, 'N/A')}°C"
             rh_val = f"{get_val(rh_el, i, 'N/A')}%"
@@ -194,14 +179,14 @@ try:
     cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C")
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
-    st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表")
-    # 帶入主 API (F-D0047-059) 與 全台備援 API (F-D0047-091)
-    cy_matrix = fetch_and_build_matrix("F-D0047-059", "F-D0047-091", "嘉義市", "東區")
+    st.markdown("#### 📊 嘉義東區未來 72 小時逐時精細觀測報表 (每 3 小時更新)")
+    # 💡 核心修改：對接 72 小時鄉鎮預報 API (嘉義市 F-D0047-057)
+    cy_matrix = fetch_and_build_72h_matrix("F-D0047-057", "F-D0047-089", "東區")
     
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
-        st.warning("⚠️ 嘉義一週矩陣預報因氣象署後台臨時維報，暫時無法取得，請稍候重新整理。")
+        st.warning("⚠️ 嘉義 72 小時預報資料暫時無法取得。")
 
     st.markdown("### ---")
 
@@ -224,14 +209,14 @@ try:
     ty_col2.metric(label="🌡️ 桃園當日即時氣溫", value=f"{ty_obs_temp} °C")
     ty_col3.metric(label="🌧️ 桃園當日累積降雨量", value=f"{ty_obs_rain} mm")
     
-    st.markdown("#### 📊 桃園新屋區未來一週農事氣象矩陣報表")
-    # 帶入主 API (F-D0047-007) 與 全台備援 API (F-D0047-091)
-    ty_matrix = fetch_and_build_matrix("F-D0047-007", "F-D0047-091", "桃園市", "新屋區")
+    st.markdown("#### 📊 桃園新屋區未來 72 小時逐時精細觀測報表 (每 3 小時更新)")
+    # 💡 核心修改：對接 72 小時鄉鎮預報 API (桃園市 F-D0047-005)
+    ty_matrix = fetch_and_build_72h_matrix("F-D0047-005", "F-D0047-089", "新屋區")
     
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
     else:
-        st.warning("⚠️ 桃園一週矩陣預報因氣象署後台臨時維報，暫時無法取得，請稍候重新整理。")
+        st.warning("⚠️ 桃園 72 小時預報資料暫時無法取得。")
 
     st.markdown("### ==========================================================================")
 
