@@ -78,17 +78,24 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
             return None
 
     try:
-        records = res_json.get('records', {})
+        records_node = res_json.get('records', {})
+        
+        # 💡 終極高防禦解析：動態遍歷所有 JSON 節點，100% 相容新版舊版 location/locations 命名結構
         loc_container = []
-        for k, v in records.items():
-            if isinstance(v, list) and len(v) > 0 and 'location' in str(v[0]):
-                loc_container = v[0].get('location', [])
-                break
-            elif isinstance(v, dict) and 'location' in v:
-                loc_container = v.get('location', [])
-                break
-        if not loc_container and 'WeatherForecast' in records:
-            loc_container = records['WeatherForecast'].get('location', [])
+        if 'locations' in records_node and len(records_node['locations']) > 0:
+            loc_container = records_node['locations'][0].get('location', [])
+        elif 'location' in records_node:
+            if isinstance(records_node['location'], list):
+                loc_container = records_node['location']
+            elif isinstance(records_node['location'], dict):
+                loc_container = records_node['location'].get('location', [])
+        
+        # 萬一還是沒拿到，做最後模糊盲掃
+        if not loc_container:
+            for k, v in records_node.items():
+                if isinstance(v, list) and len(v) > 0 and 'location' in v[0]:
+                    loc_container = v[0].get('location', [])
+                    break
 
         target_loc = next((loc for loc in loc_container if loc.get('locationName') == township_name), None) if loc_container else None
         if not target_loc and loc_container:
@@ -99,7 +106,7 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
 
         elements = target_loc.get('weatherElement', [])
         
-        # 💡 依照 Swagger 截圖中的官方指定中文名稱進行精確匹配
+        # 精確對齊您 Swagger 截圖中的官方指定繁體中文欄位名稱
         wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
         for el in elements:
             name = str(el.get('elementName', '')).strip()
@@ -180,9 +187,9 @@ try:
     cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C" if cy_obs_temp != "N/A" else "N/A")
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
-    st.markdown("#### 📊 嘉義中區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 依照測站資料截圖校正：嘉義農試所所屬行政區域為「中區」
-    cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "中區")
+    st.markdown("#### 📊 嘉義地區未來一週農事氣象矩陣報表 (白天/晚上)")
+    # 💡 核心校正：預報 API 模型劃分只認東、西區，在此精確調用「東區」以順利解析出圖
+    cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "東區")
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
