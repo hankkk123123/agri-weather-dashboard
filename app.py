@@ -112,12 +112,12 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
             return None
 
         matrix_data = {}
-        # 未來一週白天與晚上預報，最多取 14 個時段
         available_slots = len(wx_el.get('time', []))
         display_slots = min(14, available_slots) 
 
         for i in range(display_slots):
             t_node = wx_el['time'][i]
+            # 💡 修正一週預報時間屬性：改用 startTime 欄位
             start_dt = t_node.get('startTime', '00-00 00:00')
             
             date_label = start_dt[5:10].replace('-', '/')
@@ -181,7 +181,7 @@ try:
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
     st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 修正點：替換為未來一週預報專用 API 代碼 (F-D0047-059)
+    # 💡 核心修正：將函數名稱對齊修正為 fetch_and_build_week_matrix
     cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "東區")
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
@@ -214,7 +214,7 @@ try:
     ty_col3.metric(label="🌧️ 桃園當日累積降雨量", value=f"{ty_obs_rain} mm")
     
     st.markdown("#### 📊 桃園新屋區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 修正點：替換為未來一週預報專用 API 代碼 (F-D0047-007)
+    # 💡 核心修正：將函數名稱對齊修正為 fetch_and_build_week_matrix
     ty_matrix = fetch_and_build_week_matrix("F-D0047-007", "F-D0047-091", "新屋區")
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
