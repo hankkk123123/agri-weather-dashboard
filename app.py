@@ -11,19 +11,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # 設定網頁標題與寬螢幕佈局
 st.set_page_config(page_title="雙區農事氣象觀測站", layout="wide")
 
-# 初始化通行證與 CODIS 歷史資料暫存大腦
+# ==================== 🔑 核心功能：網頁進入通行證驗證 ====================
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "api_key" not in st.session_state:
     st.session_state["api_key"] = ""
-if "cy_history_df" not in st.session_state:
-    st.session_state["cy_history_df"] = None
-if "ty_history_df" not in st.session_state:
-    st.session_state["ty_history_df"] = None
-if "cy_history_title" not in st.session_state:
-    st.session_state["cy_history_title"] = ""
-if "ty_history_title" not in st.session_state:
-    st.session_state["ty_history_title"] = ""
 
 if not st.session_state["authenticated"]:
     st.title("🔒 歡迎使用雙區農事氣象觀測站")
@@ -66,7 +58,7 @@ with top_col2:
 # ----------------- 📦 核心函數：未來一週官網同款矩陣解析大腦 -----------------
 def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
     headers = {"User-Agent": "Mozilla/5.0"}
-    # 💡 核心優化：網址不帶 locationName 參數，避免氣象署伺服器回傳空資料，改用預設「全部回傳」
+    # 採用預設全部回傳機制，避免單一參數過濾導致伺服器出錯
     primary_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{api_code}?Authorization={CWA_API_KEY}"
     backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{backup_api_code}?Authorization={CWA_API_KEY}"
     
@@ -103,10 +95,9 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
                     loc_container = v[0].get('location', [])
                     break
 
-        # 💡 下載完成後，由 Python 在本機記憶體進行行政區精確篩選
+        # 在本機記憶體進行行政區精確篩選
         target_loc = next((loc for loc in loc_container if str(loc.get('locationName')).strip() == township_name), None) if loc_container else None
         
-        # 萬一模糊匹配失敗，做防錯兜底
         if not target_loc and loc_container:
             for loc in loc_container:
                 if township_name in str(loc.get('locationName')):
@@ -208,11 +199,7 @@ try:
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
-        if st.session_state["cy_history_df"] is not None:
-            st.info(f"🔵 目前無法取得最新預報，系統已自動為您載入歷史備援資料：**{st.session_state['cy_history_title']}** 歷史每日雨量")
-            st.dataframe(st.session_state["cy_history_df"], use_container_width=True)
-        else:
-            st.warning("⚠️ 嘉義一週預報資料暫時無法取得，且目前尚未上傳歷史 CODIS 檔案作備援參考。")
+        st.warning("⚠️ 嘉義一週預報資料暫時無法取得。")
 
     st.markdown("### ---")
 
@@ -243,11 +230,7 @@ try:
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
     else:
-        if st.session_state["ty_history_df"] is not None:
-            st.info(f"🔵 目前無法取得最新預報，系統已自動為您載入歷史備援資料：**{st.session_state['ty_history_title']}** 歷史每日雨量")
-            st.dataframe(st.session_state["ty_history_df"], use_container_width=True)
-        else:
-            st.warning("⚠️ 桃園一週預報資料暫時無法取得，且目前尚未上傳歷史 CODIS 檔案作備援參考。")
+        st.warning("⚠️ 桃園一週預報資料暫時無法取得。")
 
     st.markdown("### ==========================================================================")
 
@@ -260,11 +243,9 @@ try:
     if uploaded_file is not None:
         filename = str(uploaded_file.name)
         
-        is_chiayi = False
         detected_location = "未知名測站"
         if "G2L020" in filename or "嘉義" in filename:
             detected_location = "嘉義農試所 (G2L020)"
-            is_chiayi = True
         elif "72C440" in filename or "桃園" in filename:
             detected_location = "桃園農改場 (72C440)"
             
@@ -304,13 +285,6 @@ try:
                 if parsed_rows:
                     result_df = pd.DataFrame(parsed_rows)
                     st.success(f"✅ 解析成功！觀測地點：**{detected_location}** ✖ 資料月份：**{detected_year_month}**")
-                    
-                    if is_chiayi:
-                        st.session_state["cy_history_df"] = result_df
-                        st.session_state["cy_history_title"] = f"{detected_location} ({detected_year_month})"
-                    else:
-                        st.session_state["ty_history_df"] = result_df
-                        st.session_state["ty_history_title"] = f"{detected_location} ({detected_year_month})"
                     
                     c1, c2 = st.columns([2, 1])
                     with c1:
