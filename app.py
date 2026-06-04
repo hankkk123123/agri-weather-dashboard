@@ -56,9 +56,6 @@ with top_col2:
 
 # ----------------- 📦 核心函數：72小時精細矩陣解析大腦 -----------------
 def fetch_and_build_72h_matrix(api_code, backup_api_code, township_name):
-    """
-    對接 Swagger 逐 3 小時資料集，產出未來 72 小時高精細度農事矩陣
-    """
     headers = {"User-Agent": "Mozilla/5.0"}
     primary_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{api_code}?Authorization={CWA_API_KEY}&locationName={township_name}"
     backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{backup_api_code}?Authorization={CWA_API_KEY}&locationName={township_name}"
@@ -101,7 +98,6 @@ def fetch_and_build_72h_matrix(api_code, backup_api_code, township_name):
 
         elements = target_loc.get('weatherElement', [])
         
-        # 模糊匹配 72 小時資料集的專屬元素名稱
         wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
         for el in elements:
             name = str(el.get('elementName', '')).strip()
@@ -115,13 +111,11 @@ def fetch_and_build_72h_matrix(api_code, backup_api_code, township_name):
             return None
 
         matrix_data = {}
-        # 72 小時逐 3 小時預報共 24 個時段
         available_slots = len(wx_el.get('time', []))
         display_slots = min(24, available_slots) 
 
         for i in range(display_slots):
             t_node = wx_el['time'][i]
-            # 取得起始時間 (例如 2026-06-04 15:00:00)
             data_time = t_node.get('dataTime', t_node.get('startTime', '00-00 00:00'))
             
             date_label = data_time[5:10].replace('-', '/')
@@ -130,22 +124,23 @@ def fetch_and_build_72h_matrix(api_code, backup_api_code, township_name):
             
             def get_val(element, index, fallback="N/A"):
                 if element and 'time' in element and index < len(element['time']):
-                    return element['time'][index]['elementValue'][0]['value']
+                    val = element['time'][index]['elementValue'][0]['value']
+                    # 💡 歷史預報防錯清洗
+                    if str(val).strip() in ['-99', '-99.0', '']: return fallback
+                    return val
                 return fallback
 
-            wx_val = t_node['elementValue'][0]['value']
-            pop_val = get_val(pop_el, i // 2 if pop_el and len(pop_el['time']) <= 12 else i, "0") # 自動平滑降雨時段對齊
+            wx_val = str(t_node['elementValue'][0]['value']).strip()
+            if wx_val in ['-99', '-99.0', '']: wx_val = "觀測維護中"
+            
+            pop_val = get_val(pop_el, i // 2 if pop_el and len(pop_el['time']) <= 12 else i, "0")
             pop_display = f"{pop_val}%" if str(pop_val).strip().isdigit() else "0%"
             t_val = f"{get_val(t_el, i, 'N/A')}°C"
             rh_val = f"{get_val(rh_el, i, 'N/A')}%"
             wd_val = get_val(wd_el, i, "微風")
 
             matrix_data[column_name] = {
-                "天氣狀況": wx_val,
-                "預估氣溫": t_val,
-                "降雨機率": pop_display,
-                "相對濕度": rh_val,
-                "預估風向": wd_val
+                "天氣狀況": wx_val, "預估氣溫": t_val, "降雨機率": pop_display, "相對濕度": rh_val, "預估風向": wd_val
             }
             
         return pd.DataFrame(matrix_data) if matrix_data else None
@@ -165,24 +160,28 @@ try:
     # =========================================================================
     st.markdown("## 🔴 第一區：嘉義農試所地區 (ID: G2L020)")
     
-    cy_obs_temp, cy_obs_rain, cy_obs_weather = "N/A", 0.0, "多雲/陰"
+    cy_obs_temp, cy_obs_rain, cy_obs_weather = "N/A", 0.0, "自動站無觀測"
     cy_station = next((s for s in all_obs_stations if s['StationId'] == 'G2L020'), None)
     if cy_station:
         we = cy_station.get('WeatherElement', {})
+        
+        # 💡 即時卡片資料清洗：防禦 -99 覆蓋
         cy_obs_temp = we.get('AirTemperature', 'N/A')
-        cy_obs_weather = we.get('Weather', '多雲')
+        if str(cy_obs_temp).strip() in ['-99', '-99.0', '-99.00']: cy_obs_temp = "N/A"
+        
+        cy_obs_weather = we.get('Weather', '自動站無觀測')
+        if str(cy_obs_weather).strip() in ['-99', '-99.0', '']: cy_obs_weather = "自動站無觀測"
+        
         cy_obs_rain = we.get('Now', {}).get('Precipitation', 0.0)
-        cy_obs_rain = 0.0 if cy_obs_rain == -99 or cy_obs_rain is None else cy_obs_rain
+        if cy_obs_rain in [-99, -99.0, None, '']: cy_obs_rain = 0.0
         
     cy_col1, cy_col2, cy_col3 = st.columns(3)
     cy_col1.metric(label="🌤️ 嘉義當日天氣狀況", value=str(cy_obs_weather))
-    cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C")
+    cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C" if cy_obs_temp != "N/A" else "N/A")
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
     st.markdown("#### 📊 嘉義東區未來 72 小時逐時精細觀測報表 (每 3 小時更新)")
-    # 💡 核心修改：對接 72 小時鄉鎮預報 API (嘉義市 F-D0047-057)
     cy_matrix = fetch_and_build_72h_matrix("F-D0047-057", "F-D0047-089", "東區")
-    
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
@@ -195,24 +194,28 @@ try:
     # =========================================================================
     st.markdown("## 🟢 第二區：桃園農改場地區 (ID: 72C440)")
     
-    ty_obs_temp, ty_obs_rain, ty_obs_weather = "N/A", 0.0, "多雲/陰"
+    ty_obs_temp, ty_obs_rain, ty_obs_weather = "N/A", 0.0, "自動站無觀測"
     ty_station = next((s for s in all_obs_stations if s['StationId'] == '72C440'), None)
     if ty_station:
         we = ty_station.get('WeatherElement', {})
+        
+        # 💡 即時卡片資料清洗：防禦 -99 覆蓋
         ty_obs_temp = we.get('AirTemperature', 'N/A')
-        ty_obs_weather = we.get('Weather', '多雲')
+        if str(ty_obs_temp).strip() in ['-99', '-99.0', '-99.00']: ty_obs_temp = "N/A"
+        
+        ty_obs_weather = we.get('Weather', '自動站無觀測')
+        if str(ty_obs_weather).strip() in ['-99', '-99.0', '']: ty_obs_weather = "自動站無觀測"
+        
         ty_obs_rain = we.get('Now', {}).get('Precipitation', 0.0)
-        ty_obs_rain = 0.0 if ty_obs_rain == -99 or ty_obs_rain is None else ty_obs_rain
+        if ty_obs_rain in [-99, -99.0, None, '']: ty_obs_rain = 0.0
         
     ty_col1, ty_col2, ty_col3 = st.columns(3)
     ty_col1.metric(label="🌤️ 桃園當日天氣狀況", value=str(ty_obs_weather))
-    ty_col2.metric(label="🌡️ 桃園當日即時氣溫", value=f"{ty_obs_temp} °C")
+    ty_col2.metric(label="🌡️ 桃園當日即時氣溫", value=f"{ty_obs_temp} °C" if ty_obs_temp != "N/A" else "N/A")
     ty_col3.metric(label="🌧️ 桃園當日累積降雨量", value=f"{ty_obs_rain} mm")
     
     st.markdown("#### 📊 桃園新屋區未來 72 小時逐時精細觀測報表 (每 3 小時更新)")
-    # 💡 核心修改：對接 72 小時鄉鎮預報 API (桃園市 F-D0047-005)
     ty_matrix = fetch_and_build_72h_matrix("F-D0047-005", "F-D0047-089", "新屋區")
-    
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
     else:
