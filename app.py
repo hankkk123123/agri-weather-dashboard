@@ -9,7 +9,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與寬螢幕佈局
-st.set_page_config(page_title="雙區農事氣象觀測站", layout="wide")
+st.set_page_config(page_title="多區農事氣象觀測站", layout="wide")
 
 # ==================== 🔑 核心功能：網頁進入通行證驗證 ====================
 if "authenticated" not in st.session_state:
@@ -18,7 +18,7 @@ if "api_key" not in st.session_state:
     st.session_state["api_key"] = ""
 
 if not st.session_state["authenticated"]:
-    st.title("🔒 歡迎使用雙區農事氣象觀測站")
+    st.title("🔒 歡迎使用多區農事氣象觀測站")
     st.markdown("---")
     st.subheader("⚠️ 本網頁內部包含即時氣象連線系統，請先輸入您的中央氣象署 API 授權碼以解鎖網頁：")
     
@@ -48,7 +48,7 @@ CWA_API_KEY = st.session_state["api_key"]
 
 top_col1, top_col2 = st.columns([8, 2])
 with top_col1:
-    st.title("🌾 嘉義 ✖ 桃園 氣象站")
+    st.title("🌾 嘉義 ✖ 桃園 ✖ 彰化北斗 氣象站")
 with top_col2:
     if st.button("🔒 鎖定網頁 / 更換 API"):
         st.session_state["authenticated"] = False
@@ -58,7 +58,6 @@ with top_col2:
 # ----------------- 📦 核心函數：未來一週官網同款矩陣解析大腦 -----------------
 def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
     headers = {"User-Agent": "Mozilla/5.0"}
-    # 採用全回傳機制獲取資料，避免 API 端參數過濾不穩定
     primary_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{api_code}?Authorization={CWA_API_KEY}"
     backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{backup_api_code}?Authorization={CWA_API_KEY}"
     
@@ -95,7 +94,6 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
                     loc_container = v[0].get('location', [])
                     break
 
-        # 在本機記憶體進行行政區匹配（確保去除空格）
         target_loc = next((loc for loc in loc_container if str(loc.get('locationName')).strip() == township_name), None) if loc_container else None
         
         if not target_loc and loc_container:
@@ -111,8 +109,6 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
 
         elements = target_loc.get('weatherElement', [])
         wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
-        
-        # 精確對齊 368 鄉鎮一週預報產品規格書規範的繁體中文名稱
         for el in elements:
             name = str(el.get('elementName', '')).strip()
             if name in ['天氣現象', 'Wx', 'Weather']: wx_el = el
@@ -177,7 +173,7 @@ try:
     # =========================================================================
     # 🏡 第一區：嘉義農試所地區
     # =========================================================================
-    st.markdown("## 嘉義農試所區 (ID: G2L020)")
+    st.markdown("## 🔴 第一區：嘉義農試所區 (ID: G2L020)")
     
     cy_obs_temp, cy_obs_rain, cy_obs_weather = "N/A", 0.0, "自動站無觀測"
     cy_station = next((s for s in all_obs_stations if s['StationId'] == 'G2L020'), None)
@@ -196,9 +192,7 @@ try:
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
     st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 正確對齊一週預報法規地理參數：東區
     cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "東區")
-    
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
@@ -209,7 +203,7 @@ try:
     # =========================================================================
     # 🏡 第二區：桃園農改場地區
     # =========================================================================
-    st.markdown("## 桃園農改場 (ID: 72C440)")
+    st.markdown("## 🟢 第二區：桃園農改場 (ID: 72C440)")
     
     ty_obs_temp, ty_obs_rain, ty_obs_weather = "N/A", 0.0, "自動站無觀測"
     ty_station = next((s for s in all_obs_stations if s['StationId'] == '72C440'), None)
@@ -229,18 +223,48 @@ try:
     
     st.markdown("#### 📊 桃園新屋區未來一週農事氣象矩陣報表 (白天/晚上)")
     ty_matrix = fetch_and_build_week_matrix("F-D0047-007", "F-D0047-091", "新屋區")
-    
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
     else:
         st.warning("⚠️ 桃園一週預報資料暫時無法取得。")
 
+    st.markdown("### ---")
+
+    # =========================================================================
+    # 🏡 第三區：彰化北斗站地區 (全新新增項目)
+    # =========================================================================
+    st.markdown("## 🔵 第三區：彰化北斗站 (ID: C0G650)")
+    
+    bd_obs_temp, bd_obs_rain, bd_obs_weather = "N/A", 0.0, "自動站無觀測"
+    bd_station = next((s for s in all_obs_stations if s['StationId'] == 'C0G650'), None)
+    if bd_station:
+        we = bd_station.get('WeatherElement', {})
+        bd_obs_temp = we.get('AirTemperature', 'N/A')
+        if str(bd_obs_temp).strip() in ['-99', '-99.0', '-99.00']: bd_obs_temp = "N/A"
+        bd_obs_weather = we.get('Weather', '自動站無觀測')
+        if str(bd_obs_weather).strip() in ['-99', '-99.0', '']: bd_obs_weather = "自動站無觀測"
+        bd_obs_rain = we.get('Now', {}).get('Precipitation', 0.0)
+        if bd_obs_rain in [-99, -99.0, None, '']: bd_obs_rain = 0.0
+        
+    bd_col1, bd_col2, bd_col3 = st.columns(3)
+    bd_col1.metric(label="🌤️ 北斗當日天氣狀況", value=str(bd_obs_weather))
+    bd_col2.metric(label="🌡️ 北斗當日即時氣溫", value=f"{bd_obs_temp} °C" if bd_obs_temp != "N/A" else "N/A")
+    bd_col3.metric(label="🌧️ 北斗當日累積降雨量", value=f"{bd_obs_rain} mm")
+    
+    st.markdown("#### 📊 彰化北斗鎮未來一週農事氣象矩陣報表 (白天/晚上)")
+    # 💡 調用彰化縣一週預報資料集 F-D0047-019
+    bd_matrix = fetch_and_build_week_matrix("F-D0047-019", "F-D0047-091", "北斗鎮")
+    if bd_matrix is not None:
+        st.dataframe(bd_matrix, use_container_width=True)
+    else:
+        st.warning("⚠️ 彰化北斗一週預報資料暫時無法取得。")
+
     st.markdown("### ==========================================================================")
 
     # =========================================================================
-    # 🏡 第三區：CODIS資料上傳區
+    # 🏡 第四區：CODIS資料上傳區
     # =========================================================================
-    st.markdown("## CODIS 歷史資料手動上傳區")
+    st.markdown("## 📂 第四區：CODIS 歷史資料手動上傳區")
     uploaded_file = st.file_uploader("選擇上傳您的 CODIS CSV 檔案", type=["csv"])
     
     if uploaded_file is not None:
@@ -251,6 +275,8 @@ try:
             detected_location = "嘉義農試所 (G2L020)"
         elif "72C440" in filename or "桃園" in filename:
             detected_location = "桃園農改場 (72C440)"
+        elif "C0G650" in filename or "北斗" in filename:
+            detected_location = "彰化北斗站 (C0G650)" # 💡 支援北斗站歷史報表識別
             
         detected_year_month = "未知年月"
         match = re.search(r'(20\d{2})[-_]?(\d{2})', filename)
@@ -302,7 +328,7 @@ try:
             except Exception as csv_err:
                 st.error(f"❌ 讀取 CSV 檔案失敗。")
     else:
-        st.info("💡 提示：目前尚未上傳歷史檔案。您可以將下載好的嘉義（G2L020）或桃園（72C440）CODIS 降雨量 CSV 直接拖曳進來，系統將自動從檔案名稱中提取編號與年月，並立刻輸出每日累積雨量。")
+        st.info("💡 提示：目前尚未上傳歷史檔案。您可以將下載好的嘉義、桃園或北斗 CODIS 降雨量 CSV 直接拖曳進來，系統將自動識別並立刻輸出每日累積雨量。")
 
 except Exception as e:
     st.error(f"網頁執行時發生錯誤，請重新整理網頁。")
