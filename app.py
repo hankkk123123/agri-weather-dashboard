@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import re
 from datetime import datetime
 import urllib3
 
@@ -125,7 +126,6 @@ def fetch_and_build_72h_matrix(api_code, backup_api_code, township_name):
             def get_val(element, index, fallback="N/A"):
                 if element and 'time' in element and index < len(element['time']):
                     val = element['time'][index]['elementValue'][0]['value']
-                    # 💡 歷史預報防錯清洗
                     if str(val).strip() in ['-99', '-99.0', '']: return fallback
                     return val
                 return fallback
@@ -164,8 +164,6 @@ try:
     cy_station = next((s for s in all_obs_stations if s['StationId'] == 'G2L020'), None)
     if cy_station:
         we = cy_station.get('WeatherElement', {})
-        
-        # 💡 即時卡片資料清洗：防禦 -99 覆蓋
         cy_obs_temp = we.get('AirTemperature', 'N/A')
         if str(cy_obs_temp).strip() in ['-99', '-99.0', '-99.00']: cy_obs_temp = "N/A"
         
@@ -198,8 +196,6 @@ try:
     ty_station = next((s for s in all_obs_stations if s['StationId'] == '72C440'), None)
     if ty_station:
         we = ty_station.get('WeatherElement', {})
-        
-        # 💡 即時卡片資料清洗：防禦 -99 覆蓋
         ty_obs_temp = we.get('AirTemperature', 'N/A')
         if str(ty_obs_temp).strip() in ['-99', '-99.0', '-99.00']: ty_obs_temp = "N/A"
         
@@ -231,11 +227,24 @@ try:
     
     if uploaded_file is not None:
         filename = str(uploaded_file.name)
+        
+        # 💡 智慧解構核心一：從「檔案名稱」直接決定地點編號與區塊
         detected_location = "未知名測站"
-        if "G2L020" in filename or "chiayi" in filename.lower() or "嘉義" in filename:
-            detected_location = "📍 嘉義農試所 (G2L020)"
-        elif "72C440" in filename or "taoyuan" in filename.lower() or "桃園" in filename:
-            detected_location = "📍 桃園農改場 (72C440)"
+        if "G2L020" in filename:
+            detected_location = "🔴 嘉義農試所 (G2L020)"
+        elif "72C440" in filename:
+            detected_location = "🟢 桃園農改場 (72C440)"
+        elif "嘉義" in filename:
+            detected_location = "🔴 嘉義農試所 (G2L020)"
+        elif "桃園" in filename:
+            detected_location = "🟢 桃園農改場 (72C440)"
+            
+        # 💡 智慧解構核心二：從「檔案名稱」用正規表達式提取年月份 (支援 2026-04 或 202604 格式)
+        detected_year_month = "未知年月"
+        # 搜尋 4 碼西元 + 橫槓(可有可無) + 2 碼月份
+        match = re.search(r'(20\d{2})[-_]?(\d{2})', filename)
+        if match:
+            detected_year_month = f"{match.group(1)}年{match.group(2)}月"
         
         with st.spinner("📊 正在解析上傳的 CODIS 月報表矩陣..."):
             try:
@@ -244,13 +253,6 @@ try:
                 except Exception:
                     uploaded_file.seek(0)
                     raw_df = pd.read_csv(uploaded_file, encoding='cp950')
-                
-                detected_year_month = datetime.now().strftime("%Y/%m")
-                for col in raw_df.columns:
-                    col_str = str(col)
-                    if "202" in col_str and ("/" in col_str or "-" in col_str):
-                        detected_year_month = col_str.strip()
-                        break
                 
                 parsed_rows = []
                 for idx, row in raw_df.iterrows():
@@ -274,7 +276,8 @@ try:
                         
                 if parsed_rows:
                     result_df = pd.DataFrame(parsed_rows)
-                    st.success(f"✅ 解析成功！檔案偵測為：**{detected_location}** ✖ 報表時間：**{detected_year_month}**")
+                    # 呈現由檔名判定的精確結果！
+                    st.success(f"✅ 解析成功！觀測地點：**{detected_location}** ✖ 資料月份：**{detected_year_month}**")
                     
                     c1, c2 = st.columns([2, 1])
                     with c1:
@@ -283,13 +286,13 @@ try:
                     with c2:
                         st.subheader("📊 當月總降雨小計")
                         total_month_rain = result_df["每日累積雨量 Precp (mm)"].sum()
-                        st.metric(label="全月總降雨量", value=f"{total_month_rain:.1f} mm")
+                        st.metric(label="全月總累積降雨量", value=f"{total_month_rain:.1f} mm")
                 else:
                     st.error("❌ 無法從此檔案結構中讀取到日總和數據。")
             except Exception as csv_err:
                 st.error(f"❌ 讀取 CSV 檔案失敗。")
     else:
-        st.info("💡 提示：目前尚未上傳歷史檔案。您可以將下載好的嘉義或桃園 CODIS 降雨量 CSV 直接拖曳進來，系統將自動辨識地區、年月份並立刻輸出每日降雨明細表。")
+        st.info("💡 提示：目前尚未上傳歷史檔案。您可以將下載好的嘉義（G2L020）或桃園（72C440）CODIS 降雨量 CSV 直接拖曳進來，系統將自動從檔案名稱中提取編號與年月，並立刻輸出每日累積雨量。")
 
 except Exception as e:
     st.error(f"網頁執行時發生錯誤，請重新整理網頁。")
