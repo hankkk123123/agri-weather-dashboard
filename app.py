@@ -44,8 +44,8 @@ else:
         cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C")
         cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
         
-        # 2. 處理嘉義未來一週預報 (精確對接 F-D0047-059 規格書)
-        st.markdown("#### 🔮 嘉義東區未來一週天氣與降雨機率預報")
+        # 2. 處理嘉義未來一週預報 (F-D0047-059) -> 轉化為官網矩陣排版
+        st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表")
         cy_forecast_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-059?Authorization={CWA_API_KEY}&locationName=東區"
         cy_fore_res = requests.get(cy_forecast_url, verify=False).json()
         
@@ -53,31 +53,44 @@ else:
             cy_loc_node = cy_fore_res['records']['locations'][0]['location'][0]
             cy_elements = cy_loc_node['weatherElement']
             
-            # 💡 依照 Swagger 規格書欄位名稱進行精確匹配
+            # 抽取出官網表格對應的所有重要氣象因子
             cy_wx = next((el for el in cy_elements if el['elementName'] in ['天氣現象', 'Wx']), None)
             cy_pop = next((el for el in cy_elements if el['elementName'] in ['12小時降雨機率', 'PoP12h']), None)
+            cy_t = next((el for el in cy_elements if el['elementName'] in ['平均溫度', 'T']), None)
+            cy_rh = next((el for el in cy_elements if el['elementName'] in ['相對濕度', 'RH']), None)
+            cy_wd = next((el for el in cy_elements if el['elementName'] in ['風向', 'WD']), None)
             
-            cy_slots, cy_states, cy_pops = [], [], []
             if cy_wx:
-                for i, t in enumerate(cy_wx['time'][:14]):
+                # 建立多因子字典
+                matrix_data = {}
+                for i, t in enumerate(cy_wx['time'][:12]): # 拿前 6 天 (12個時段)
                     start_dt = t['startTime']
+                    date_label = start_dt[5:10].replace('-', '/')
                     day_part = "白天" if 6 <= int(start_dt[11:13]) < 18 else "晚上"
-                    cy_slots.append(f"{start_dt[5:10].replace('-', '/')} ({day_part})")
-                    cy_states.append(t['elementValue'][0]['value'])
+                    column_name = f"{date_label}\n({day_part})"
                     
-                    if cy_pop and i < len(cy_pop['time']):
-                        p_val = cy_pop['time'][i]['elementValue'][0]['value']
-                        cy_pops.append(f"{p_val}%" if str(p_val).strip().isdigit() else "0%")
-                    else:
-                        cy_pops.append("0%")
-                        
-                cy_df = pd.DataFrame({"預報時間段": cy_slots, "預估天氣狀態": cy_states, "降雨機率 PoP": cy_pops})
-                st.dataframe(cy_df, use_container_width=True, hide_index=True)
+                    # 抽取同索引時間點的各項數值
+                    wx_val = t['elementValue'][0]['value']
+                    pop_val = f"{cy_pop['time'][i]['elementValue'][0]['value']}%" if cy_pop and i < len(cy_pop['time']) and str(cy_pop['time'][i]['elementValue'][0]['value']).strip().isdigit() else "0%"
+                    t_val = f"{cy_t['time'][i]['elementValue'][0]['value']}°C" if cy_t and i < len(cy_t['time']) else "N/A"
+                    rh_val = f"{cy_rh['time'][i]['elementValue'][0]['value']}%" if cy_rh and i < len(cy_rh['time']) else "N/A"
+                    wd_val = cy_wd['time'][i]['elementValue'][0]['value'] if cy_wd and i < len(cy_wd['time']) else "N/A"
+                    
+                    matrix_data[column_name] = {
+                        "天氣狀況": wx_val,
+                        "預估氣溫": t_val,
+                        "降雨機率": pop_val,
+                        "相對濕度": rh_val,
+                        "預估風向": wd_val
+                    }
+                
+                cy_matrix_df = pd.DataFrame(matrix_data)
+                # 呈現跟官網一模一樣橫向延展的雙因子大表
+                st.dataframe(cy_matrix_df, use_container_width=True)
             else:
-                st.warning("⚠️ 嘉義預報資料集中未偵測到指定的觀測要素欄位。")
+                st.warning("⚠️ 嘉義預報欄位解析不完整。")
         except Exception as e:
-            st.warning("🔍 嘉義一週氣象預報資料暫時無法解析。")
-            st.caption(f"除錯訊息: {e}")
+            st.warning("🔍 嘉義一週矩陣預報暫時無法解析。")
 
         st.markdown("### ---")
 
@@ -101,8 +114,8 @@ else:
         ty_col2.metric(label="🌡️ 桃園當日即時氣溫", value=f"{ty_obs_temp} °C")
         ty_col3.metric(label="🌧️ 桃園當日累積降雨量", value=f"{ty_obs_rain} mm")
         
-        # 2. 處理桃園未來一週預報 (對接 F-D0047-007 規格書)
-        st.markdown("#### 🔮 桃園新屋區未來一週天氣與降雨機率預報")
+        # 2. 處理桃園未來一週預報 (F-D0047-007) -> 轉化為官網矩陣排版
+        st.markdown("#### 📊 桃園新屋區未來一週農事氣象矩陣報表")
         ty_forecast_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-007?Authorization={CWA_API_KEY}&locationName=新屋區"
         ty_fore_res = requests.get(ty_forecast_url, verify=False).json()
         
@@ -110,30 +123,40 @@ else:
             ty_loc_node = ty_fore_res['records']['locations'][0]['location'][0]
             ty_elements = ty_loc_node['weatherElement']
             
-            ty_wx = next((el for el in ty_elements if el['elementName'] in ['天氣現象', 'Wx']), None)
+            ty_wx = next((el for el in ty_elements if el['elementName'] == 'Wx'), None)
             ty_pop = next((el for el in ty_elements if el['elementName'] in ['12小時降雨機率', 'PoP12h']), None)
+            ty_t = next((el for el in ty_elements if el['elementName'] in ['平均溫度', 'T']), None)
+            ty_rh = next((el for el in ty_elements if el['elementName'] in ['相對濕度', 'RH']), None)
+            ty_wd = next((el for el in ty_elements if el['elementName'] in ['風向', 'WD']), None)
             
-            ty_slots, ty_states, ty_pops = [], [], []
             if ty_wx:
-                for i, t in enumerate(ty_wx['time'][:14]):
+                ty_matrix_data = {}
+                for i, t in enumerate(ty_wx['time'][:12]):
                     start_dt = t['startTime']
+                    date_label = start_dt[5:10].replace('-', '/')
                     day_part = "白天" if 6 <= int(start_dt[11:13]) < 18 else "晚上"
-                    ty_slots.append(f"{start_dt[5:10].replace('-', '/')} ({day_part})")
-                    ty_states.append(t['elementValue'][0]['value'])
+                    column_name = f"{date_label}\n({day_part})"
                     
-                    if ty_pop and i < len(ty_pop['time']):
-                        p_val = ty_pop['time'][i]['elementValue'][0]['value']
-                        ty_pops.append(f"{p_val}%" if str(p_val).strip().isdigit() else "0%")
-                    else:
-                        ty_pops.append("0%")
-                        
-                ty_df = pd.DataFrame({"預報時間段": ty_slots, "預估天氣狀態": ty_states, "降雨機率 PoP": ty_pops})
-                st.dataframe(ty_df, use_container_width=True, hide_index=True)
+                    wx_val = t['elementValue'][0]['value']
+                    pop_val = f"{ty_pop['time'][i]['elementValue'][0]['value']}%" if ty_pop and i < len(ty_pop['time']) and str(ty_pop['time'][i]['elementValue'][0]['value']).strip().isdigit() else "0%"
+                    t_val = f"{ty_t['time'][i]['elementValue'][0]['value']}°C" if ty_t and i < len(ty_t['time']) else "N/A"
+                    rh_val = f"{ty_rh['time'][i]['elementValue'][0]['value']}%" if ty_rh and i < len(ty_rh['time']) else "N/A"
+                    wd_val = ty_wd['time'][i]['elementValue'][0]['value'] if ty_wd and i < len(ty_wd['time']) else "N/A"
+                    
+                    ty_matrix_data[column_name] = {
+                        "天氣狀況": wx_val,
+                        "預估氣溫": t_val,
+                        "降雨機率": pop_val,
+                        "相對濕度": rh_val,
+                        "預估風向": wd_val
+                    }
+                
+                ty_matrix_df = pd.DataFrame(ty_matrix_data)
+                st.dataframe(ty_matrix_df, use_container_width=True)
             else:
-                st.warning("⚠️ 桃園預報資料集中未偵測到指定的觀測要素欄位。")
+                st.warning("⚠️ 桃園預報欄位解析不完整。")
         except Exception as e:
-            st.warning("🔍 桃園一週氣象預報資料暫時無法解析。")
-            st.caption(f"除錯訊息: {e}")
+            st.warning("🔍 桃園一週矩陣預報暫時無法解析。")
 
         st.markdown("### ==========================================================================")
 
@@ -141,13 +164,10 @@ else:
         # 🏡 第三區：CODIS資料上傳區
         # =========================================================================
         st.markdown("## 🔵 第三區：CODIS 歷史資料手動上傳區")
-        st.write("請將從 CODIS 下載的 **「單項逐時月報表 (降水量)」** CSV 檔案上傳至下方：")
-        
         uploaded_file = st.file_uploader("選擇上傳您的 CODIS CSV 檔案", type=["csv"])
         
         if uploaded_file is not None:
             filename = str(uploaded_file.name)
-            
             detected_location = "未知名測站"
             if "G2L020" in filename or "chiayi" in filename.lower() or "嘉義" in filename:
                 detected_location = "📍 嘉義農試所 (G2L020)"
@@ -163,8 +183,6 @@ else:
                         raw_df = pd.read_csv(uploaded_file, encoding='cp950')
                     
                     detected_year_month = datetime.now().strftime("%Y/%m")
-                    
-                    # 遍歷欄位動態搜尋年月份
                     for col in raw_df.columns:
                         col_str = str(col)
                         if "202" in col_str and ("/" in col_str or "-" in col_str):
@@ -178,7 +196,6 @@ else:
                             if not day_str.isdigit():
                                 continue
                             day_num = int(day_str)
-                            
                             total_val = str(row.iloc[-1]).upper().strip()
                             
                             if 'T' in total_val or 'X' in total_val or 'V' in total_val or '--' in total_val or not total_val:
@@ -205,17 +222,7 @@ else:
                             st.subheader("📊 當月總降雨小計")
                             total_month_rain = result_df["每日累積雨量 Precp (mm)"].sum()
                             st.metric(label="全月總降雨量", value=f"{total_month_rain:.1f} mm")
-                            
-                            max_rain = result_df.loc[result_df["每日累積雨量 Precp (mm)"].idxmax()]
-                            if max_rain["每日累積雨量 Precp (mm)"] > 0:
-                                st.info(f"💡 本月下雨最大單日：\n**{max_rain['日期 (Date)']}**，降雨量達 **{max_rain['每日累積雨量 Precp (mm)']} mm**")
                     else:
-                        st.error("❌ 無法從此檔案結構中讀取到日總和數據，請確認您下載的是 CODIS 的「單項逐時月報表」。")
+                        st.error("❌ 無法從此檔案結構中讀取到日總和數據。")
                 except Exception as csv_err:
-                    st.error(f"❌ 讀取 CSV 檔案失敗。錯誤原因: {csv_err}")
-        else:
-            st.info("💡 提示：目前尚未上傳歷史檔案。您可以將下載好的嘉義或桃園 CODIS 降雨量 CSV 直接拖曳進來，系統將自動辨識地區、年月份並立刻輸出每日降雨明細表。")
-
-    except Exception as e:
-        st.error(f"系統執行時發生未預期錯誤，請確認側邊欄的 API 授權碼是否填寫正確。")
-        st.caption(f"詳細錯誤訊息: {e}")
+                    st.error(f"❌ 讀取 CSV 檔案失敗。")
