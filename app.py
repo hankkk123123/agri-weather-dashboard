@@ -48,7 +48,7 @@ CWA_API_KEY = st.session_state["api_key"]
 
 top_col1, top_col2 = st.columns([8, 2])
 with top_col1:
-    st.title("🌾 嘉義 ✖ 桃園 雙區聯防農事氣象站")
+    st.title("🌾 嘉義 ✖ 桃園 氣象站")
 with top_col2:
     if st.button("🔒 鎖定網頁 / 更換 API"):
         st.session_state["authenticated"] = False
@@ -158,7 +158,7 @@ try:
     # =========================================================================
     # 🏡 第一區：嘉義農試所地區
     # =========================================================================
-    st.markdown("## 🔴 第一區：嘉義農試所地區 (ID: G2L020)")
+    st.markdown("## 嘉義農試所區 (ID: G2L020)")
     
     cy_obs_temp, cy_obs_rain, cy_obs_weather = "N/A", 0.0, "自動站無觀測"
     cy_station = next((s for s in all_obs_stations if s['StationId'] == 'G2L020'), None)
@@ -190,7 +190,7 @@ try:
     # =========================================================================
     # 🏡 第二區：桃園農改場地區
     # =========================================================================
-    st.markdown("## 🟢 第二區：桃園農改場地區 (ID: 72C440)")
+    st.markdown("## 桃園農改場 (ID: 72C440)")
     
     ty_obs_temp, ty_obs_rain, ty_obs_weather = "N/A", 0.0, "自動站無觀測"
     ty_station = next((s for s in all_obs_stations if s['StationId'] == '72C440'), None)
@@ -222,7 +222,7 @@ try:
     # =========================================================================
     # 🏡 第三區：CODIS資料上傳區
     # =========================================================================
-    st.markdown("## 🔵 第三區：CODIS 歷史資料手動上傳區")
+    st.markdown("## CODIS 歷史資料手動上傳區")
     uploaded_file = st.file_uploader("選擇上傳您的 CODIS CSV 檔案", type=["csv"])
     
     if uploaded_file is not None:
@@ -231,13 +231,13 @@ try:
         # 💡 智慧解構核心一：從「檔案名稱」直接決定地點編號與區塊
         detected_location = "未知名測站"
         if "G2L020" in filename:
-            detected_location = "🔴 嘉義農試所 (G2L020)"
+            detected_location = "嘉義農試所 (G2L020)"
         elif "72C440" in filename:
-            detected_location = "🟢 桃園農改場 (72C440)"
+            detected_location = "桃園農改場 (72C440)"
         elif "嘉義" in filename:
-            detected_location = "🔴 嘉義農試所 (G2L020)"
+            detected_location = "嘉義農試所 (G2L020)"
         elif "桃園" in filename:
-            detected_location = "🟢 桃園農改場 (72C440)"
+            detected_location = "桃園農改場 (72C440)"
             
         # 💡 智慧解構核心二：從「檔案名稱」用正規表達式提取年月份 (支援 2026-04 或 202604 格式)
         detected_year_month = "未知年月"
