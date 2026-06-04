@@ -55,28 +55,21 @@ with top_col2:
         st.session_state["api_key"] = ""
         st.rerun()
 
-# ----------------- 📦 核心函數：一週農業氣象預報解析大腦 -----------------
-def fetch_and_build_agriculture_matrix(station_name, region_keyword):
-    """
-    完全依照 F-A0010-001 官方說明文件規格開發
-    跨分區調用農業氣象預報、氣溫、相對濕度、降雨機率等指標，進行橫向交叉矩陣拼裝
-    """
+# ----------------- 📦 核心函數：未來一週官網同款矩陣解析大腦 -----------------
+def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
     headers = {"User-Agent": "Mozilla/5.0"}
-    # 主調用：F-A0010-001 一週農業氣象預報資料集
-    url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-A0010-001?Authorization={CWA_API_KEY}"
-    # 備援調用：F-D0047-091 全台一般一週天氣預報
-    backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-091?Authorization={CWA_API_KEY}&locationName={region_keyword}"
+    primary_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{api_code}?Authorization={CWA_API_KEY}&locationName={township_name}"
+    backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{backup_api_code}?Authorization={CWA_API_KEY}&locationName={township_name}"
     
     res_json = None
     try:
-        res = requests.get(url, headers=headers, verify=False, timeout=8)
+        res = requests.get(primary_url, headers=headers, verify=False, timeout=8)
         if res.status_code == 200 and "records" in res.json():
             res_json = res.json()
     except:
         pass
         
-    # 💡 第一層防禦：若農業客製化介面臨時維護，自動切換至 Swagger 標準一週預報接口
-    if res_json is None or 'records' not in res_json:
+    if res_json is None:
         try:
             res = requests.get(backup_url, headers=headers, verify=False, timeout=8)
             if res.status_code == 200 and "records" in res.json():
@@ -86,87 +79,93 @@ def fetch_and_build_agriculture_matrix(station_name, region_keyword):
 
     try:
         records = res_json.get('records', {})
+        loc_container = []
         
-        # 1. 嘗試解析 F-A0010-001 專屬農業氣象結構
-        if 'agriculturalForecast' in records or 'WeatherForecast' in records:
-            # 兼容不同欄位包裝層級
-            forecast_node = records.get('agriculturalForecast', records.get('WeatherForecast', {}))
-            location_list = forecast_node.get('forecasts', {}).get('station', []) if 'forecasts' in forecast_node else forecast_node.get('location', [])
-            
-            # 精確尋找屬於該農業區或縣市的預報節點
-            target_node = None
-            for loc in location_list:
-                loc_name = str(loc.get('stationName', loc.get('locationName', '')))
-                if station_name in loc_name or region_keyword in loc_name:
-                    target_node = loc
+        # 智慧相容多層級結構
+        if 'locations' in records and len(records['locations']) > 0:
+            loc_container = records['locations'][0].get('location', [])
+        elif 'location' in records:
+            if isinstance(records['location'], list):
+                loc_container = records['location']
+            elif isinstance(records['location'], dict):
+                loc_container = records['location'].get('location', [])
+        
+        if not loc_container:
+            for k, v in records.items():
+                if isinstance(v, list) and len(v) > 0 and 'location' in str(v[0]):
+                    loc_container = v[0].get('location', [])
                     break
-            if not target_node and location_list:
-                target_node = location_list[0]
-                
-            if target_node:
-                elements = target_node.get('weatherElement', [])
-                wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
-                
-                # 依照規格書與現行 API 對齊繁簡/中英名稱項目
-                for el in elements:
-                    name = str(el.get('elementName', '')).strip()
-                    if name in ['weather', 'weatherForecasts', '天氣現象', 'Wx']: wx_el = el
-                    elif name in ['pop', '12小時降雨機率', 'PoP12h', '降雨機率']: pop_el = el
-                    elif name in ['temperature', '平均溫度', '溫度', 'T']: t_el = el
-                    elif name in ['rh', '平均相對濕度', '相對濕度', 'RH']: rh_el = el
-                    elif name in ['wd', '風向', 'WD']: wd_el = el
-                
-                if wx_el:
-                    matrix_data = {}
-                    available_slots = len(wx_el.get('time', []))
-                    display_slots = min(14, available_slots)
-                    
-                    for i in range(display_slots):
-                        t_node = wx_el['time'][i]
-                        start_dt = t_node.get('startTime', '00-00 00:00')
-                        
-                        date_label = start_dt[5:10].replace('-', '/')
-                        hour_part = int(start_dt[11:13]) if len(start_dt) > 13 else 12
-                        day_part = "白天" if 6 <= hour_part < 18 else "晚上"
-                        column_name = f"{date_label}\n({day_part})"
-                        
-                        def get_val(element, index, fallback="N/A"):
-                            if element and 'time' in element and index < len(element['time']):
-                                val = element['time'][index]['elementValue'][0]['value']
-                                if str(val).strip() in ['-99', '-99.0', '']: return fallback
-                                return val
-                            return fallback
-                        
-                        wx_val = str(t_node['elementValue'][0]['value']).strip()
-                        if wx_val in ['-99', '-99.0', '']: wx_val = "觀測維護中"
-                        
-                        pop_val = get_val(pop_el, i, "0")
-                        pop_display = f"{pop_val}%" if str(pop_val).strip().isdigit() else "0%"
-                        t_val = f"{get_val(t_el, i, 'N/A')}°C"
-                        rh_val = f"{get_val(rh_el, i, 'N/A')}%"
-                        wd_val = get_val(wd_el, i, "微風")
-                        
-                        matrix_data[column_name] = {
-                            "天氣狀況": wx_val, "預估氣溫": t_val, "降雨機率": pop_display, "相對濕度": rh_val, "預估風向": wd_val
-                        }
-                    return pd.DataFrame(matrix_data) if matrix_data else None
+
+        target_loc = next((loc for loc in loc_container if loc.get('locationName') == township_name), None) if loc_container else None
+        if not target_loc and loc_container:
+            target_loc = loc_container[0]
+
+        if not target_loc:
+            return None
+
+        elements = target_loc.get('weatherElement', [])
         
-        # 2. 如果上述解構失敗，啟動備援盲掃遍歷
-        for k, v in records.items():
-            if isinstance(v, list) and len(v) > 0 and ('location' in str(v[0]) or 'station' in str(v[0])):
-                loc_list = v[0].get('location', v[0].get('station', []))
-                # 執行基本橫向表格拼裝
-                if loc_list:
-                    # 寬鬆對接邏輯
-                    pass
-        return None
+        # 精確對齊 368 鄉鎮一週預報產品規格書規範的繁體中文名稱
+        wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
+        for el in elements:
+            name = str(el.get('elementName', '')).strip()
+            if name in ['天氣現象', 'Wx', 'Weather']: wx_el = el
+            elif name in ['12小時降雨機率', 'PoP12h', 'PoP', '降雨機率', 'ProbabilityOfPrecipitation']: pop_el = el
+            elif name in ['平均溫度', 'T', '溫度', 'Temperature']: t_el = el
+            elif name in ['平均相對濕度', '相對濕度', 'RH', 'RelativeHumidity']: rh_el = el
+            elif name in ['風向', 'WD', 'WindDirection']: wd_el = el
+
+        if not wx_el:
+            return None
+
+        matrix_data = {}
+        available_slots = len(wx_el.get('time', []))
+        display_slots = min(14, available_slots) 
+
+        for i in range(display_slots):
+            t_node = wx_el['time'][i]
+            start_dt = t_node.get('startTime', '00-00 00:00')
+            
+            date_label = start_dt[5:10].replace('-', '/')
+            hour_part = int(start_dt[11:13]) if len(start_dt) > 13 else 12
+            day_part = "白天" if 6 <= hour_part < 18 else "晚上"
+            column_name = f"{date_label}\n({day_part})"
+            
+            # 安全取值並清洗 -99 異常碼
+            def get_val(element, index, fallback="N/A"):
+                if element and 'time' in element and index < len(element['time']):
+                    t_item = element['time'][index]
+                    if 'elementValue' in t_item and len(t_item['elementValue']) > 0:
+                        val = t_item['elementValue'][0].get('value', fallback)
+                        if str(val).strip() in ['-99', '-99.0', '']: return fallback
+                        return val
+                return fallback
+
+            if 'elementValue' in t_node and len(t_node['elementValue']) > 0:
+                wx_val = str(t_node['elementValue'][0].get('value', '觀測維護中')).strip()
+            else:
+                wx_val = "觀測維護中"
+                
+            if wx_val in ['-99', '-99.0', '']: wx_val = "觀測維護中"
+            
+            pop_val = get_val(pop_el, i, "0")
+            pop_display = f"{pop_val}%" if str(pop_val).strip().isdigit() else "0%"
+            t_val = f"{get_val(t_el, i, 'N/A')}°C"
+            rh_val = f"{get_val(rh_el, i, 'N/A')}%"
+            wd_val = get_val(wd_el, i, "微風")
+
+            matrix_data[column_name] = {
+                "天氣狀況": wx_val, "預估氣溫": t_val, "降雨機率": pop_display, "相對濕度": rh_val, "預估風向": wd_val
+            }
+            
+        return pd.DataFrame(matrix_data) if matrix_data else None
     except:
         return None
 
 # =========================================================================
 
 try:
-    # 預先抓取全台即時觀測資料集 (O-A0001-001)
+    # 預先抓取全台即時觀測資料集
     obs_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization={CWA_API_KEY}"
     obs_res = requests.get(obs_url, verify=False).json()
     all_obs_stations = obs_res.get('records', {}).get('Station', [])
@@ -194,9 +193,9 @@ try:
     cy_col2.metric(label="🌡️ 嘉義當日即時氣溫", value=f"{cy_obs_temp} °C" if cy_obs_temp != "N/A" else "N/A")
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
-    st.markdown("#### 📊 嘉義地區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 依照規格書對接：主要抓取「嘉義」農業預報，備援鄉鎮區指向包含該測站區域的「東區」
-    cy_matrix = fetch_and_build_agriculture_matrix("嘉義", "東區")
+    st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表 (白天/晚上)")
+    # 💡 呼叫端對齊更新為 fetch_and_build_week_matrix
+    cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "東區")
     if cy_matrix is not None:
         st.dataframe(cy_matrix, use_container_width=True)
     else:
@@ -228,8 +227,8 @@ try:
     ty_col3.metric(label="🌧️ 桃園當日累積降雨量", value=f"{ty_obs_rain} mm")
     
     st.markdown("#### 📊 桃園新屋區未來一週農事氣象矩陣報表 (白天/晚上)")
-    # 💡 依照規格書對接：主要抓取「新屋」或「桃園」農業預報，備援鄉鎮區指向「新屋區」
-    ty_matrix = fetch_and_build_agriculture_matrix("新屋", "新屋區")
+    # 💡 呼叫端對齊更新為 fetch_and_build_week_matrix
+    ty_matrix = fetch_and_build_week_matrix("F-D0047-007", "F-D0047-091", "新屋區")
     if ty_matrix is not None:
         st.dataframe(ty_matrix, use_container_width=True)
     else:
