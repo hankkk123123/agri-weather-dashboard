@@ -58,7 +58,7 @@ with top_col2:
 # ----------------- 📦 核心函數：未來一週官網同款矩陣解析大腦 -----------------
 def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
     headers = {"User-Agent": "Mozilla/5.0"}
-    # 採用預設全部回傳機制，避免單一參數過濾導致伺服器出錯
+    # 採用全回傳機制獲取資料，避免 API 端參數過濾不穩定
     primary_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{api_code}?Authorization={CWA_API_KEY}"
     backup_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{backup_api_code}?Authorization={CWA_API_KEY}"
     
@@ -95,7 +95,7 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
                     loc_container = v[0].get('location', [])
                     break
 
-        # 在本機記憶體進行行政區精確篩選
+        # 💡 在本機記憶體進行行政區匹配（去除空格精確對齊）
         target_loc = next((loc for loc in loc_container if str(loc.get('locationName')).strip() == township_name), None) if loc_container else None
         
         if not target_loc and loc_container:
@@ -111,6 +111,8 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
 
         elements = target_loc.get('weatherElement', [])
         wx_el, pop_el, t_el, rh_el, wd_el = None, None, None, None, None
+        
+        # 💡 精確對齊資料集中的官方中文欄位名稱
         for el in elements:
             name = str(el.get('elementName', '')).strip()
             if name in ['天氣現象', 'Wx', 'Weather']: wx_el = el
@@ -167,7 +169,7 @@ def fetch_and_build_week_matrix(api_code, backup_api_code, township_name):
 # =========================================================================
 
 try:
-    # 預先抓取全台即時觀測資料集
+    # 預先抓取全台即時觀測資料集 (O-A0001-001)
     obs_url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization={CWA_API_KEY}"
     obs_res = requests.get(obs_url, verify=False).json()
     all_obs_stations = obs_res.get('records', {}).get('Station', [])
@@ -194,6 +196,7 @@ try:
     cy_col3.metric(label="🌧️ 嘉義當日累積降雨量", value=f"{cy_obs_rain} mm")
     
     st.markdown("#### 📊 嘉義東區未來一週農事氣象矩陣報表 (白天/晚上)")
+    # 💡 帶入一週資料集認得的行政區：東區
     cy_matrix = fetch_and_build_week_matrix("F-D0047-059", "F-D0047-091", "東區")
     
     if cy_matrix is not None:
